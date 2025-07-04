@@ -1,0 +1,1178 @@
+---
+title: "Figures rapport"
+output: html_document
+date: "2025-04-07"
+---
+
+```{r Species to consider}
+
+library(openxlsx)
+
+path = ("~/Sea_of_immaturity/data/raw_data")
+
+#Taxa from BRUVS program
+info_species_BRUVS <- read.xlsx(paste(path, sep= "/", "BRUVS taxa list 2025_01_6.xlsx"), sheet = 2)
+lspecies_BRUVS <- info_species_BRUVS$Taxa
+
+#Taxa from RLS program
+
+raw_data_RLS <- read.csv(paste(path, sep= "/", "RLS_raw.csv"))
+lspecies_RLS <- unique(raw_data_RLS$species_name)
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Ajouter une colonne source aux dataframes de départ
+lspecies_BRUVS <- as.data.frame(lspecies_BRUVS) %>% 
+  mutate(source = "BRUVS") %>% 
+  rename(species_name = lspecies_BRUVS)
+
+lspecies_RLS <- as.data.frame(lspecies_RLS) %>% 
+  mutate(source = "RLS") %>% 
+  rename(species_name = lspecies_RLS)
+
+# Combiner les espèces des deux sources
+combined_species <- rbind(lspecies_BRUVS, lspecies_RLS)
+
+# Vérifier si l'espèce est concernée par le pattern d'exclusion
+exclusion_pattern <- "\\bsp(\\d+)?\\b|\\bspp\\b"
+combined_species <- combined_species %>%
+  mutate(excluded = ifelse(grepl(exclusion_pattern, species_name), "Rejected", "Accepted"))
+
+# Compter les espèces par source et statut (acceptées/rejetées)
+species_count <- combined_species %>%
+  group_by(source, excluded) %>%
+  summarise(count = n(), .groups = "drop")
+
+# Ajouter le total des espèces uniques pour éviter les doublons
+total_species <- combined_species %>%
+  distinct(species_name, excluded) %>%
+  group_by(excluded) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  mutate(source = "Total")
+
+# Fusionner les données pour le plot
+plot_data <- bind_rows(species_count, total_species)
+plot_data <- plot_data %>%
+  mutate(Category = case_when(
+    source == "BRUVS" & excluded == "Accepted" ~ "BRUVS_Accepted",
+    source == "BRUVS" & excluded == "Rejected"  ~ "Rejected",
+    source == "RLS" & excluded == "Accepted"   ~ "RLS_Accepted",
+    source == "RLS" & excluded == "Rejected"   ~ "Rejected",
+    source == "Total" & excluded == "Accepted" ~ "Total_Accepted",
+    source == "Total" & excluded == "Rejected"  ~ "Rejected"
+  ))
+
+plot_data$Category <- factor(plot_data$Category, levels = c(
+  "Rejected", "BRUVS_Accepted",  "RLS_Accepted", "Total_Accepted"
+))
+
+# Définition des couleurs
+my_colors1 <- c(
+  "BRUVS_Accepted" = "#64B5F6",  # Orange clair  # Orange foncé
+  "RLS_Accepted" = "#F57C00",   # Bleu foncé
+  "Total_Accepted" = "#BA68C8",  # Violet clair
+  "Rejected" = "lightgrey"   # Violet foncé
+)
+
+# Création du stacked bar plot
+species_to_consider <- ggplot(plot_data, aes(x = source, y = count, fill = Category)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5), size = 5, color = "black") +
+  scale_fill_manual(values = my_colors1) +  # Appliquer la palette personnalisée
+  labs(title = "Number of species considered",
+       x = "Source",
+       y = "Number of Species",
+       fill = "Category") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#f0f8ff"),  # Bleu très clair en fond
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(color = "black", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+
+```
+
+```{r Info by source}
+
+load("~/Sea_of_immaturity/outputs/Measurment_clustered.Rdata")
+
+Measurment_data_clustered <- Measurment_data_clustered %>%
+  mutate(Source = recode(Source,
+                         "bruvs_benthic" = "benthic BRUVS",
+                         "bruvs_pelagic" = "pelagic BRUVS",
+                         "rls" = "RLS"))
+
+# Number of surveys
+
+surveys_count <- Measurment_data_clustered %>%
+  group_by(Source) %>%
+  summarise(count = n_distinct(cluster), .groups = "drop")
+
+my_colors <- c(
+  "benthic BRUVS" = "#1976D2",
+  "RLS" = "#F57C00",  
+  "pelagic BRUVS" = "#64B5F6"  
+)
+
+surveys_count <- ggplot(surveys_count, aes(x = Source, y = count, fill = Source)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5), size = 5, color = "black") +
+  scale_fill_manual(values = my_colors) +  # Appliquer la palette personnalisée
+  labs(title = "Number of surveys by source",
+       x = "Source",
+       y = "Number of surveys",
+       fill = "Source") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#f0f8ff"),  # Bleu très clair en fond
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(color = "black", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+
+
+# Number of sites surveyed
+
+sites_count <- Measurment_data_clustered %>%
+  group_by(Source) %>%
+  summarise(count = n_distinct(paste0(latitude, "_", longitude)), .groups = "drop")
+
+sites_surveyed <- ggplot(sites_count, aes(x = Source, y = count, fill = Source)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5), size = 5, color = "black") +
+  scale_fill_manual(values = my_colors) +  # Appliquer la palette personnalisée
+  labs(title = "Number of sites surveyed",
+       x = "Source",
+       y = "Number of sites",
+       fill = "Source") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#f0f8ff"),  # Bleu très clair en fond
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(color = "black", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+
+# Number of measurments
+
+measurment_count <- Measurment_data_clustered %>%
+  group_by(Source) %>%
+  summarise(count = n(), .groups = "drop")
+
+nb_measurments <- ggplot(measurment_count, aes(x = Source, y = count, fill = Source)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5), size = 5, color = "black") +
+  scale_fill_manual(values = my_colors) +  # Appliquer la palette personnalisée
+  labs(title = "Total number of measurments taken",
+       x = "Source",
+       y = "Number of measurments",
+       fill = "Source") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#f0f8ff"),  # Bleu très clair en fond
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(color = "black", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+
+#Number of measurùments by survey
+
+site_data <- Measurment_data_clustered %>%
+  group_by(latitude, longitude, survey_date, Source, cluster) %>%
+  summarise(
+    mean_p_maturity = mean(p_maturity, na.rm = TRUE),
+    var_p_maturity = ifelse(is.na(sd(p_maturity)), 1e-6, sd(p_maturity, na.rm = TRUE)),
+    coeff_var_maturity = ifelse(is.na(sd(p_maturity)), 1e-6/mean_p_maturity,sd(p_maturity, na.rm = TRUE)/mean_p_maturity),
+    all_p_maturity = list(p_maturity),
+    nb_individuals = n(),
+    cumul_p_maturity = sum(p_maturity),
+    cumul_p_mat_norm = cumul_p_maturity / nb_individuals
+  ) %>%
+  ungroup()
+
+plot_boxplot_indiv <- ggplot(site_data, aes(x = Source, y = nb_individuals, fill = Source)) +
+  geom_boxplot(color = "black", alpha = 0.7, outliers = FALSE) +
+  scale_fill_manual(values = my_colors) + 
+  theme_minimal() +
+  labs(title = "Number of individuals measured per survey", 
+       x = "Source", y = "Number of individuals measured") +
+  facet_wrap(~ Source, scales = "free") +  # Séparer par source 
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#f0f8ff"),  # Bleu très clair en fond
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(color = "black", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+# Afficher le graphique
+print(plot_boxplot_indiv)
+```
+
+```{r Info by source dans un tableau}
+library(gt)
+P_mat <- P_mat %>%
+  mutate(across(where(is.character), as.factor),
+         survey_date = lubridate::year(as.Date(survey_date))) %>%
+  group_by(longitude, latitude) %>%
+  slice_max(order_by = survey_date, n = 1, with_ties = FALSE) %>%
+  ungroup()
+P_mat <- P_mat %>% mutate(inside_protection = case_when(protection_status!="out"~TRUE, protection_status=="out"~FALSE))
+
+site_data <- Measurment_data_clustered %>%
+  group_by(cluster, Source) %>%
+  summarise(
+    mean_p_maturity = mean(p_maturity, na.rm = TRUE),
+    var_p_maturity = ifelse(is.na(sd(p_maturity)), 1e-6, sd(p_maturity, na.rm = TRUE)),
+    coeff_var_maturity = ifelse(is.na(sd(p_maturity)), 1e-6/mean_p_maturity,sd(p_maturity, na.rm = TRUE)/mean_p_maturity),
+    all_p_maturity = list(p_maturity),
+    nb_individuals = n(),
+    cumul_p_maturity = sum(p_maturity),
+    cumul_p_mat_norm = cumul_p_maturity / nb_individuals
+  ) %>%
+  ungroup()
+
+# Créer un tableau de données avec les chiffres clés
+# Totaux pour les pourcentages
+total_species <- 3222
+total_sites <- 12066
+total_measurements <- 1862668
+total_protected <- dim(P_mat[P_mat$inside_protection==TRUE,])[1]
+
+summary_table <- tibble::tibble(
+  Method = c("Total","Pelagic BRUVS", "Benthic BRUVS", "RLS"),
+  Image = c(
+    "",
+    "~/Sea_of_immaturity/figures/Figures rapport/bruvs_pelagic.png",
+    "~/Sea_of_immaturity/figures/Figures rapport/bruvs_benthic.png",
+    "~/Sea_of_immaturity/figures/Figures rapport/RLS.png"
+  ),
+  `Species considered` = c(3222, 566, 2046, 2719
+  ),
+  `Sites surveyed` = c(
+    total_sites,
+    paste0(round(2479 / total_sites * 100, 1), "%"),
+    paste0(round(6085 / total_sites * 100, 1), "%"),
+    paste0(round(3502 / total_sites * 100, 1), "%")
+  ),
+  `Total measurements` = c(
+    total_measurements,
+    paste0(round(37995 / total_measurements * 100, 1), "%"),
+    paste0(round(336869 / total_measurements * 100, 1), "%"),
+    paste0(round(1487804 / total_measurements * 100, 1), "%")
+  ),
+  `Mean individuals measured per survey` = c(
+    round(mean(site_data$nb_individuals), 1),
+    round(mean(site_data[site_data$Source == "bruvs_pelagic", ]$nb_individuals), 1),
+    round(mean(site_data[site_data$Source == "bruvs_benthic", ]$nb_individuals), 1),
+    round(mean(site_data[site_data$Source == "rls", ]$nb_individuals), 1)
+  ), 
+  `% sites protected` = c(
+    paste0(round(total_protected / total_sites * 100, 1), "%"),
+    paste0(round(1223 / total_sites * 100, 1), "%"),
+    paste0(round(2768 / total_sites * 100, 1), "%"),
+    paste0(round(1805 / total_sites * 100, 1), "%")
+    
+  )
+)
+
+summary_table$Image <- path.expand(summary_table$Image)
+
+# Créer le tableau avec des images dans la première colonne
+summary_table %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(columns = c(Image)),
+    fn = function(x) {
+      sapply(x, function(img_path) {
+        img_path <- path.expand(img_path)
+        if (file.exists(img_path) && nzchar(img_path)) {
+          local_image(filename = img_path, height = 50)
+        } else {
+          ""
+        }
+      })
+    }
+  ) %>%
+  cols_label(
+    Method = "Method",
+    Image = "",
+    `Species considered` = "Species considered",
+    `Sites surveyed` = "Sites surveyed",
+    `Total measurements` = "Measurements taken",
+    `Mean individuals measured per survey` = "Mean individuals measured per survey", 
+    `% sites protected` = "Sites protected (%)"
+  ) %>%
+  tab_header(
+    title = "Summary of Survey Methods and Data Collected"
+  ) %>%
+  tab_options(
+    table.background.color = "#e6f2ff",       # Fond bleu clair
+    heading.background.color = "#cce6ff",     # Titre plus soutenu
+    column_labels.background.color = "#cce6ff"  # Fond des en-têtes
+  )
+
+
+```
+
+```{r Descriptive figure -- supp result}
+library(patchwork)
+
+(species_to_consider + sites_surveyed) / (nb_measurments + sites_surveyed)
+```
+
+```{r Characterise species}
+
+library(ape)
+
+load("~/Sea_of_immaturity/data/derived_data/species_traits_final_fixed2.Rdata")
+
+var_phylo <- c("Class", "Order", "Family", "Genus", "species_name")
+
+taxo_df <- species_traits_final %>%
+  select(all_of(var_phylo)) %>%
+  na.omit()
+
+taxo_df <- taxo_df %>% mutate(across(c(species_name, Genus, Family, Class, Order), as.factor))
+
+# Calcul du nombre de genres et d'espèces par famille
+family_stats <- taxo_df %>%
+  group_by(Family) %>%
+  summarise(
+    n_species = n_distinct(species_name),
+    n_genera = n_distinct(Genus)
+  )
+
+
+# Créer une table des labels
+node_labels <- family_stats %>%
+  mutate(label = paste0(Family, "\n", n_genera, " genres, ", n_species, " espèces"))
+
+# Normalisation du nombre d'espèces pour le dégradé
+family_stats$color_value <- scales::rescale(family_stats$n_species, to = c(0.2, 1))
+
+# final df for the creation of the tree
+taxo_family_df <- taxo_df %>%
+  select(Class, Order, Family) %>%
+  distinct()  # Supprime les doublons
+
+library(ggtree)
+library(ggplot2)
+library(dplyr)
+
+# Construire l'arbre phylogénétique jusqu'à la famille
+tree_family <- ape::as.phylo(~Class/Order/Family, data = taxo_family_df)
+
+# Vérifier si l'arbre est enraciné et corriger si nécessaire
+if (!is.rooted(tree_family)) {
+  tree <- root(tree_family, outgroup = tree_family$tip.label[1], resolve.root = TRUE)
+}
+tree_family <- multi2di(tree)  # Résolution des polytomies
+tree_family$node.label <- NULL  # Supprime les labels des nœuds internes
+
+# Vérifier et attribuer des longueurs de branches si absentes
+if (is.null(tree_family$edge.length)) {
+  tree_family <- compute.brlen(tree, method = "Grafen")
+}
+# Transformer l'arbre en tibble pour ggtree
+tree_data <- as_tibble(tree_family)
+
+# Joindre les infos de taxonomie
+tree_data <- tree_data %>%
+  left_join(family_stats, by = c("label" = "Family"))  # Associer les stats aux labels
+
+# Définir la palette de couleurs en fonction du nombre d'espèces
+color_map <- setNames(scales::viridis_pal()(length(unique(tree_data$n_species))), unique(tree_data$n_species))
+
+# Afficher l'arbre avec les labels et la coloration
+p_family <- ggtree(tree_family) %<+% tree_data +  
+  geom_tiplab(aes(label = paste0(label, ",genus,",n_genera, ",sp,", n_species )), size = 1, hjust = 0) +  # Labels des familles
+  geom_text2(aes(subset = !isTip, label = label), 
+             size = 2.5, vjust = -0.3, hjust=1.5) +  # Infos sur les familles
+  geom_tree(aes(color = n_species)) +  # Coloration selon le nombre d'espèces
+  scale_color_viridis_c() +  # Dégradé de couleurs
+  theme(legend.position = "right")
+
+# Affichage
+print(p_family)
+```
+
+```{r Choose dimensionality miss forest}
+load("~/Sea_of_immaturity/outputs/MF3 RF3/choose_dimensionality_phylogeny_mF3.Rdata")
+
+resumed_data <- results_dimensionality |>
+  dplyr::group_by(variable, dimensions) |>
+  dplyr::summarise(median_estimate = median(estimate))|>
+  tidyr::drop_na(median_estimate) 
+
+resumed_data$dimensions <- as.factor(resumed_data$dimensions)
+
+## Plot performance against the number of dimensions
+perf_dim <-ggplot(resumed_data) +
+  aes(x= dimensions, y= median_estimate, fill= dimensions)+
+  geom_boxplot(outlier.alpha = 0) +
+  geom_jitter(width=0.15, alpha=0.2)+
+  xlab("") + ylab("Assessement quality (median of R-squared and accuracy among traits)") +
+  theme_minimal() +
+  scale_fill_manual(values = grDevices::colorRampPalette(
+    RColorBrewer::brewer.pal(9, "OrRd"))(length(unique(resumed_data$dimensions)))) +
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(color = "black"),
+        axis.title = element_text(size = 10),
+        axis.text.x = element_text(size = 10))
+
+```
+
+```{r Traits completness}
+
+load("~/Sea_of_immaturity/data/derived_data/species_traits_final_fixed2.Rdata")
+
+library(funbiogeo)
+library(ggplot2)
+species_traits_final <- dplyr::rename(species_traits_final,species = species_name) 
+
+cols <- c("depth_min", "depth_max", "a", "b", "LMax", "K")
+
+if (all(cols %in% colnames(species_traits_final))) {
+  species_traits_final <- species_traits_final %>%
+    mutate(across(all_of(cols), ~ log10(. + 1), .names = "log_{.col}")) %>%
+    select(-all_of(cols))  # Supprime les anciennes colonnes
+}
+
+liste_var <- c("ClimVuln_SSP126","Climate","DemersPelag","Fertilization","IUCN_category","IUCN_inferred_Loiseau23","ReproMode","Schooling"        ,"Status","TempPrefM", "TempPrefMean",  "TempPrefMin", "Troph", "Vulnerability_fishing", "log_K", "log_LMax", "log_a", "log_b", "log_depth_max", "log_depth_min")
+
+species_traits_final <- species_traits_final %>% select(all_of(liste_var), species)
+
+plot_completness <- fb_plot_number_species_by_trait(species_traits_final, threshold_species_proportion = 1)
+
+```
+
+```{r Result MF}
+library(jpeg)
+
+load(file = here::here("outputs", "predictive_model_eval_species_traits2.Rdata"))
+source(here::here("R","02_b_evaluation_prediction_model.R"))
+source(here::here("R","02_a_MissForest_functions.R"))
+
+## Extract results
+results <- extract_model_perf(raw_result = model_eval_missforest_MCA)
+traits_performance <- results[[1]]
+order_performance <- results[[2]]
+raw_factors_perf <- results[[3]]
+raw_numeric_perf <- results[[4]]
+
+
+## Plot performance of prediction
+# Estimate distributions (boxplot)
+boxplot_missforest <- estimates_boxplot(df_estimates = traits_performance)
+boxplot_missforest
+
+boxplot_missforest_import <- readJPEG("~/Sea_of_immaturity/figures/MF3_RF3/3_Missforest_final_performance_boxplot_traits.jpg")
+```
+
+```{r Completness + perf_dim + result_MF}
+patch <- perf_dim / boxplot_missforest
+
+plot_completness + patch
+```
+
+```{r Bayesian generative model}
+library(ggplot2)
+library(viridis)
+
+# Paramètres de l'espèce test
+Lm_min <- 30
+Lm_max <- 40
+p_min <- 0.1
+p_max <- 0.9
+epsilon <- 1e-4
+delta <- 0.01
+
+# Générer des longueurs de poissons
+Length <- seq(20, 60, by = 0.1)
+
+# Fonction pour calculer beta assurant p_maturity(Lm_max) = 0.9 et p_maturity(Lm_min)=0.1
+
+calculate_beta <- function(Lm_min, Lm_max, p_min, p_max) {
+  log((p_max / (1 - p_max)) / (p_min / (1 - p_min))) / 0.5
+}
+beta <- calculate_beta(Lm_min, Lm_max, p_min, p_max)
+
+
+# Calcul de la probabilité de maturité avec la correction
+p_maturity <- case_when(
+  Length < Lm_min ~ p_min * (Length / Lm_min),  
+  Length >= Lm_min & Length <= Lm_max ~ p_min + (1 - p_min) / (1 + exp(-beta * ((Length - Lm_min) / (Lm_max - Lm_min) - 0.5))),  
+  Length > Lm_max ~ 1 - epsilon - (1 - (p_min + (1 - p_min) / (1 + exp(-beta * (0.5))))) * exp(-beta * (Length - Lm_max))
+)
+
+# Créer un data frame
+df <- data.frame(Length, p_maturity) 
+
+plot <- ggplot(df, aes(x = Length, y = p_maturity, color = p_maturity)) +
+  geom_path(size = 2) +
+  scale_color_viridis_c(option = "viridis") +
+  geom_vline(xintercept = Lm_min, linetype = "dashed", color = "black", size=1) +
+  geom_vline(xintercept = Lm_max, linetype = "dashed", color = "black", size=1) +
+  labs(x = "Length (L)", y = "Probability of maturity", 
+       title = "Maturity probability curve as a function of length") +
+  theme_minimal()
+```
+
+```{r fat clusters}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# 1. Sélectionner les clusters avec une forme "intermediate_flat"
+flat_clusters <- cluster_profiles %>%
+  filter(shape_type == "intermediate_flat") %>% 
+  dplyr::slice_sample(n = 6) # par exemple, prendre 6 au hasard
+
+flat_clusters <- flat_clusters %>%
+  group_by(cluster) %>%
+  slice(1) %>%  # pour garder une ligne par cluster
+  ungroup() %>%
+  slice_sample(n = 6)
+
+
+# 2. Extraire les lignes correspondantes de la matrice
+selected_probs <- Measurment_data_clustered[Measurment_data_clustered$cluster %in% flat_clusters$cluster, ]
+selected_probs <- Measurment_data_clustered[Measurment_data_clustered$cluster=="C39_4", ]
+
+# 4. Tracer les profils
+ggplot(selected_probs, aes(x = p_maturity, color = factor(cluster))) +
+  geom_density(size = 1) +
+  labs(title = "Profils de probabilité de maturité - Distributions plates",
+       x = "Taille (ou classe de taille)",
+       y = "Probabilité de maturité",
+       color = "Cluster") +
+  theme_minimal()
+
+```
+
+```{r Example of communities distributions}
+selected_clusters <- c("EDD14_070",   "AB07_039",   "812315782", "C39_4")
+
+is_Ushaped <- function(x) {
+  # Vérifie si les valeurs extrêmes sont plus grandes que la moyenne
+  left <- x[1]
+  right <- x[length(x)]
+  center <- x[round(length(x)/2)]
+  mean_val <- mean(x, na.rm = TRUE)
+  (left > mean_val & right > mean_val & center < mean_val)
+}
+
+cluster_profiles <- Measurment_data_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+  mean_p_maturity = mean(p_maturity, na.rm = TRUE),
+  cv_p_maturity = ifelse(is.na(sd(p_maturity)), 1e-6/mean_p_maturity,sd(p_maturity, na.rm = TRUE)/mean_p_maturity),
+  kurtosis_p_maturity = kurtosis(p_maturity),
+  is_Ushaped = is_Ushaped(p_maturity)
+)
+
+# Classification en 4 catégories
+cluster_profiles <- cluster_profiles %>%
+  mutate(
+    shape_type = case_when(
+      mean_p_maturity < 0.1 ~ "immature",
+      mean_p_maturity > 0.9 & cv_p_maturity < 1 ~ "mature",
+      mean_p_maturity > 0.1 & mean_p_maturity < 0.9 & kurtosis_p_maturity < 2 ~ "intermediate_flat",
+      mean_p_maturity > 0.1 & mean_p_maturity < 0.9 & kurtosis_p_maturity >= 2 ~ "intermediate_U",
+      TRUE ~ "uncertain"
+    )
+  )
+
+# Sélectionner 3 clusters contrastés :
+low_maturity <- cluster_profiles %>% filter(shape_type == "immature") %>% arrange(mean_p_maturity) %>% slice(7)
+intermediate_flat <- cluster_profiles %>% filter(shape_type == "intermediate_flat") %>% slice(100)
+intermediate_U <- cluster_profiles %>% filter(shape_type == "intermediate_U") %>% slice(7)
+high_maturity <- cluster_profiles %>% filter(shape_type == "mature") %>% arrange(desc(mean_p_maturity)) %>% slice(7)
+
+selected_clusters <- c(low_maturity$cluster, intermediate_flat$cluster, intermediate_U$cluster, high_maturity$cluster)
+
+
+# Filtrer les données
+sub_data <- Measurment_data_clustered %>%
+  filter(cluster %in% selected_clusters) %>%
+  mutate(cluster = factor(cluster, 
+                          levels = selected_clusters,
+                          labels = c("Community 1", "Community 2", "Community 3", "Community 4")))
+
+means <- sub_data %>%
+  group_by(cluster) %>%
+  summarise(mean_maturity = mean(p_maturity, na.rm = TRUE))
+
+# Création de la palette
+my_viridis_palette <- c(
+  "Community 1" = "#440154",     # violet foncé
+  "Community 2" = "#21918C",  # vert/bleu
+  "Community 3" = "#FDE725"      # jaune vif
+)
+
+# Tracer les distributions avec couleurs et lignes de moyenne
+plot_distrib_density <- ggplot(sub_data, aes(x = p_maturity, color = cluster, fill = cluster)) +
+  geom_density(alpha = 0.4, size = 1.2) +
+  geom_vline(data = means, aes(xintercept = mean_maturity, color = cluster),
+             linetype = "dashed", size = 1) +
+  facet_wrap(~cluster, scales = "free_y") +
+  labs(
+    title = "Contrasted maturity probability distributions between 3 communities",
+    x = "Probability of maturity", y = "Density"
+  ) +
+  scale_color_manual(values = my_viridis_palette) +
+  scale_fill_manual(values = my_viridis_palette) +
+  theme_minimal()
+
+plot_distrib_density
+```
+
+
+```{r cluster density}
+# Calcul des statistiques par cluster
+cluster_profiles <- Measurment_data_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+    mean_p = mean(p_maturity, na.rm = TRUE),
+    sd_p = sd(p_maturity, na.rm = TRUE),
+    n = n(),
+    cv_p = ifelse(mean_p > 0, sd_p / mean_p, NA)
+  ) %>%
+  filter(n >= 10)  # On garde les clusters représentatifs
+
+# Identifier un exemple de cluster de chaque type :
+
+# Immature : moyenne < 0.1, CV < 1.21
+cluster_immature <- cluster_profiles %>%
+  filter(mean_p < 0.1, cv_p < 1.21) %>%
+  arrange(mean_p) %>%
+  slice(1)
+
+# Très hétérogène : CV élevé >= 1.21
+cluster_hetero <- cluster_profiles %>%
+  filter(cv_p >= 1.21) %>%
+  arrange(desc(cv_p)) %>%
+  slice(5)
+
+# Intermédiaire : mean entre 0.4 et 0.6, CV modéré
+cluster_intermediate <- cluster_profiles %>%
+  filter(mean_p >= 0.4, mean_p <= 0.6, cv_p >= 0.35, cv_p <= 1.21) %>%
+  arrange(abs(mean_p - 0.5)) %>%
+  slice(1)
+
+# Mature : moyenne > 0.9, CV < 1.21
+cluster_mature <- cluster_profiles %>%
+  filter(mean_p > 0.9, cv_p < 1.21) %>%
+  arrange(desc(mean_p)) %>%
+  slice(1)
+
+# Afficher les clusters sélectionnés
+selected_clusters <- bind_rows(
+  Immature = cluster_immature,
+  `Très hétérogène` = cluster_hetero,
+  Intermédiaire = cluster_intermediate,
+  Mature = cluster_mature,
+  .id = "Type"
+)
+
+selected_clusters <- selected_clusters$cluster
+# Associer un nom à chaque cluster
+cluster_labels <- c(
+  "912345404" = "Immature",
+  "C3_879" = "Highly Heterogeneous",
+  "91234331" = "Intermediate",
+  "2001108" = "Mature"  # À remplacer par le vrai ID d’un site mature
+)
+
+# Préparer les données
+sub_data <- Measurment_data_clustered %>%
+  filter(cluster %in% selected_clusters) %>%
+  mutate(cluster = factor(cluster, 
+                          levels = selected_clusters,
+                          labels = cluster_labels[selected_clusters]))
+
+# Moyennes par communauté
+means <- sub_data %>%
+  group_by(cluster) %>%
+  summarise(mean_maturity = mean(p_maturity, na.rm = TRUE))
+
+# Palette manuelle pour les 4 profils
+my_viridis_palette <- c(
+  "Immature" = "#440154",         # violet foncé
+  "Highly Heterogeneous" = "#F8766D",  # rouge/rose
+  "Intermediate" = "#21918C",    # vert/bleu
+  "Mature" = "#FDE725"            # jaune vif
+)
+
+# Tracer la distribution
+plot_distrib_density <- ggplot(sub_data, aes(x = p_maturity, color = cluster, fill = cluster)) +
+  geom_density(alpha = 0.4, size = 1.2) +
+  geom_vline(data = means, aes(xintercept = mean_maturity, color = cluster),
+             linetype = "dashed", size = 1) +
+  facet_wrap(~cluster, scales = "free_y") +
+  labs(
+    title = "Maturity probability distributions across 4 typical community types",
+    x = "Probability of maturity", y = "Density"
+  ) +
+  scale_color_manual(values = my_viridis_palette) +
+  scale_fill_manual(values = my_viridis_palette) +
+  theme_minimal()
+
+# Affichage
+plot_distrib_density
+```
+
+
+```{r map global maturity}
+site_data <- Measurment_data_clustered %>%
+  group_by(latitude, longitude, survey_date, Source, cluster) %>%
+  summarise(
+    mean_p_maturity = ifelse(n() >= 5, mean(p_maturity, na.rm = TRUE), NA), # Moyenne uniquement si n >=5
+    coeff_var_maturity = ifelse(n() >= 5, sd(p_maturity, na.rm = TRUE)/mean_p_maturity, NA),
+    var_p_maturity = ifelse(sd(p_maturity) ==0, 1e-6, sd(p_maturity, na.rm = TRUE)),
+    #all_p_maturity = list(p_maturity)  # Stocker toutes les valeurs de probabilité par site
+  ) %>%
+  ungroup()
+
+
+site_sf <- st_as_sf(site_data, coords = c("longitude", "latitude"), crs = 4326, remove=FALSE)
+
+## Créer une carte avec la moyenne des probabilités de maturité
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# Charger les données de carte du monde
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+plot_mean <- ggplot(site_sf) +
+  geom_sf(data = world, fill = "gray85", color = "grey99") +
+  geom_point(aes(x = longitude, y = latitude, 
+                 color = mean_p_maturity, 
+                 size = 1/coeff_var_maturity)) +  # Inverse de la variation
+  scale_color_viridis_c(name = "Mean Probability of Maturity") +
+  scale_size_binned_area(name = "Inverse of Maturity Variation Coefficient", 
+                        guide = guide_legend(reverse = TRUE),max_size = 2) +
+  coord_sf(expand = FALSE) +
+  theme_minimal() +
+  labs(title = "Spatial patterns of maturity in marine fish communities", 
+       x = "Longitude", y = "Latitude")
+```
+
+
+```{r Summarise the info from P_mat}
+library(dplyr)
+library(gt)
+library(moments)
+
+#Critères pour classer les sites
+cv_low <- 0.35    # 1er quartile
+cv_high <- 1.21   # 3e quartile
+mean_low <- 0.1
+mean_high <- 0.9
+
+# Ajouter les colonnes d’intérêt
+P_mat <- P_mat %>%
+  mutate(
+    Hemisphere = ifelse(latitude >= 0, "Northern", "Southern"),
+    Latitudinal_zone = case_when(
+      abs(latitude) < 23.5 ~ "Tropical",
+      abs(latitude) < 35 ~ "Subtropical",
+      abs(latitude) < 60 ~ "Temperate",
+      TRUE ~ "Polar/Subpolar"
+    ),
+    cv_inverse_class = cut(1 / cv_p_maturity,
+                           breaks = quantile(1 / cv_p_maturity, probs = seq(0, 1, 0.25), na.rm = TRUE),
+                           include.lowest = TRUE)
+  )
+
+# P_mat <- P_mat %>%
+#   mutate(across(where(is.character), as.factor),
+#          survey_date = lubridate::year(as.Date(survey_date))) %>%
+#   group_by(longitude, latitude) %>%
+#   slice_max(order_by = survey_date, n = 1, with_ties = FALSE) %>%
+#   ungroup()
+
+library(e1071)  # pour skewness et kurtosis
+
+# Fonction pour calculer le coefficient de bimodalité
+coef_bimodal <- function(x) {
+  s <- skewness(x, na.rm = TRUE)
+  k <- kurtosis(x, na.rm = TRUE)
+  if (is.na(s) | is.na(k) | k < 1e-3) {
+    return(NA)
+  } else {
+    return((s^2 + 1) / k)
+  }
+}
+
+# Calculer le coefficient de bimodalité par site
+bimodal_df <- Measurment_data_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+    bimodal_coef = coef_bimodal(p_maturity),
+    .groups = "drop", 
+    median_p_mat = median(p_maturity, na.rm = TRUE)
+  ) %>%
+  mutate(bimodal_site = ifelse(bimodal_coef > 0.555, "bimodal", "unimodal"))
+
+# Joindre à P_mat (si tu veux garder l'info par ligne de données)
+P_mat <- left_join(P_mat, bimodal_df, by = "cluster")
+
+# Calculs des statistiques globales
+summary_stats <- tibble(
+  Stat = c(
+    "Global mean of maturity probability",
+    "SD of maturity probability",
+    "Skewness of maturity probability",
+    "Global mean of maturity CV",
+    "SD of maturity CV",
+    "Skewness of maturity CV",
+    "Immature",
+    "Mature",
+    "Intermediate",
+    "Sites in Northern Hemisphere",
+    "Sites in Southern Hemisphere",
+    "Tropical sites",
+    "Subtropical sites",
+    "Temperate sites",
+    "Polar/Subpolar sites"
+  ),
+  Value = c(
+    mean(P_mat$mean_p_maturity, na.rm = TRUE),
+    sd(P_mat$mean_p_maturity, na.rm = TRUE),
+    skewness(P_mat$mean_p_maturity, na.rm = TRUE),
+    mean(P_mat$cv_p_maturity, na.rm = TRUE),
+    sd(P_mat$cv_p_maturity, na.rm = TRUE),
+    skewness(P_mat$cv_p_maturity, na.rm = TRUE),
+    sum(P_mat$mean_p_maturity < 0.1 , na.rm = TRUE),
+    sum(P_mat$mean_p_maturity > 0.9 & P_mat$cv_p_maturity < 1 , na.rm = TRUE),
+    sum(P_mat$mean_p_maturity > 0.1 & P_mat$mean_p_maturity <0.9 & P_mat$cv_p_maturity <=1.5, na.rm = TRUE),
+    sum(P_mat$Hemisphere == "Northern", na.rm = TRUE),
+    sum(P_mat$Hemisphere == "Southern", na.rm = TRUE),
+    sum(P_mat$Latitudinal_zone == "Tropical", na.rm = TRUE),
+    sum(P_mat$Latitudinal_zone == "Subtropical", na.rm = TRUE),
+    sum(P_mat$Latitudinal_zone == "Temperate", na.rm = TRUE),
+    sum(P_mat$Latitudinal_zone == "Polar/Subpolar", na.rm = TRUE)
+  )
+)
+
+# Statistiques par classe de l'inverse du CV
+cv_inverse_class_counts <- P_mat %>%
+  count(cv_inverse_class, name = "Site count") %>%
+  mutate(Stat = paste0("Sites in CV^-1 class ", cv_inverse_class)) %>%
+  select(Stat, Value = `Site count`)
+
+# Statistiques par Realm (si cette colonne existe)
+if ("Realm" %in% names(P_mat)) {
+  realm_counts <- P_mat %>%
+    count(Realm) %>%
+    mutate(Stat = paste0("Sites in Realm: ", Realm)) %>%
+    select(Stat, Value = n)
+} else {
+  realm_counts <- tibble()
+}
+
+# Fusion finale
+summary_table <- bind_rows(summary_stats, cv_inverse_class_counts, realm_counts)
+
+# Affichage GT
+summary_table %>%
+  gt() %>%
+  tab_header(title = "Summary of Maturity Metrics Across Survey Sites") %>%
+  fmt_number(columns = "Value", decimals = 2)
+
+```
+
+```{r vérification}
+P_mat <- P_mat %>% left_join(cluster_profiles %>% dplyr::select(kurtosis_p_maturity, is_Ushaped, cluster), by ="cluster")
+
+P_mat <- P_mat %>%
+  mutate(site_class = case_when(
+    mean_p_maturity < 0.1 & cv_p_maturity < 1 ~ "Immature",
+    mean_p_maturity > 0.9 & cv_p_maturity < 1 ~ "Mature",
+    cv_p_maturity > 1.5 ~ "Highly Heterogeneous",
+    between(mean_p_maturity, 0.1, 0.9) & cv_p_maturity <= 1.5 & is_Ushaped ==FALSE ~ "Intermediate_flat",
+    between(mean_p_maturity, 0.1, 0.9) & cv_p_maturity <= 1.5 & is_Ushaped ==TRUE~ "Intermediate_U",
+    TRUE ~ "Uncertain"
+  ))
+
+# Scatterplot
+p1 <- ggplot(P_mat, aes(x = mean_p_maturity, y = cv_p_maturity, color = site_class)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Scatterplot: Maturity Mean vs CV", x = "Mean p_maturity", y = "CV p_maturity") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+# Histogramme des moyennes
+p2 <- ggplot(P_mat, aes(x = mean_p_maturity, fill = site_class)) +
+  geom_histogram(bins = 30, alpha = 0.7, position = "identity") +
+  labs(title = "Histogram: Mean Maturity Probability", x = "Mean p_maturity", y = "Count") +
+  theme_minimal()
+
+# Histogramme du CV
+p3 <- ggplot(P_mat, aes(x = cv_p_maturity, fill = site_class)) +
+  geom_histogram(bins = 30, alpha = 0.7, position = "identity") +
+  labs(title = "Histogram: Maturity CV", x = "CV p_maturity", y = "Count") +
+  theme_minimal()
+
+# Compte de sites par classe
+p5 <- P_mat %>%
+  count(site_class) %>%
+  ggplot(aes(x = reorder(site_class, -n), y = n, fill = site_class)) +
+  geom_col(alpha = 0.8) +
+  labs(title = "Number of Sites per Class", x = "Site Class", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Patchwork layout
+(p1 | p2 | p3) / p5 + plot_layout(heights = c(2, 2, 1))
+
+
+```
+
+```{r Communty_level maturity metrics}
+library(ggplot2)
+library(ggpubr)
+
+site_data <- P_mat
+
+site_data <- site_data %>%
+  mutate(System = case_when(
+    Source == "rls" | Source == "bruvs_benthic" ~ "benthic",
+    Source == "bruvs_pelagic" ~ "pelagic"
+  ))
+
+my_colors <- c(
+  "benthic" = "#F57C00",  
+  "pelagic" = "#64B5F6"  
+)
+
+
+# Fonction pour catégoriser
+categorize_latitude <- function(lat) {
+  lat_abs <- abs(lat)
+  
+  if (lat_abs < 23.5) {
+    return("Tropical")
+  } else if (lat_abs < 35) {
+    return("Subtropical")
+  } else if (lat_abs < 60) {
+    return("Temperate")
+  } else {
+    return("Polar/Subpolar")
+  }
+}
+
+# Application
+zone_climatique <- sapply(site_data$latitude, categorize_latitude)
+
+# Catégorie zone climatique
+site_data <-site_data %>%
+  mutate( Latitudinale_zone = zone_climatique)
+
+# Zones à comparer
+comparisons_lat <- list(
+  c("Tropical", "Temperate"),
+  c("Tropical", "Subtropical"),
+  c("Temperate", "Subtropical"))
+
+site_data$Latitudinale_zone <- factor(site_data$Latitudinale_zone, 
+                                      levels = c("Tropical", "Subtropical", "Temperate", "Polar/Subpolar"))
+
+plot_latitudinal_cv <- ggplot(site_data[site_data$Latitudinale_zone!="Polar/Subpolar",], aes(x = Latitudinale_zone, y = cv_p_maturity, fill = System)) +
+  geom_boxplot(alpha = 0.7) +
+  stat_compare_means(comparisons = comparisons_lat, method = "t.test", label = "p.signif", size = 4) +
+  theme_minimal() +
+  labs(
+    title = "Maturity variation coefficient according to the latitudinal zone",
+    x = "Latitudinal zone",
+    y = "Maturity variation coefficient",
+    fill = "System"
+  ) +
+  scale_fill_manual(values = my_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # tourne les labels si besoin
+
+plot_latitudinal <- ggplot(site_data[site_data$Latitudinale_zone!="Polar/Subpolar",], aes(x = Latitudinale_zone, y = mean_p_maturity, fill = System)) +
+  geom_boxplot(alpha = 0.7) +
+  stat_compare_means(comparisons = comparisons_lat, method = "t.test", label = "p.signif", size = 4) +
+  theme_minimal() +
+  labs(
+    title = "Mean maturity probability according to the latitudinal zone",
+    x = "Latitudinal zone",
+    y = "Mean maturity probability",
+    fill = "System"
+  ) +
+  scale_fill_manual(values = my_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # tourne les labels si besoin
+
+plot_latitudinal + plot_latitudinal_cv
+```
+
+```{r Comparaison benthic pelagic}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(broom)
+library(gt)
+
+# Comparaison de la moyenne des probabilités de maturité entre systèmes pour chaque zone
+test_results_mean <- site_data %>%
+  filter(Latitudinale_zone != "Polar/Subpolar") %>%
+  group_by(Latitudinale_zone) %>%
+  filter(n_distinct(System) == 2) %>%  # Assure que les deux systèmes sont présents
+  group_split() %>%
+  map_dfr(~{
+    zone <- unique(.x$Latitudinale_zone)
+    res <- t.test(mean_p_maturity ~ System, data = .x)
+    tidy(res) %>%
+      mutate(Zone = zone,
+             Metric = "Mean maturity probability")
+  })
+
+# Comparaison du coefficient de variation entre systèmes pour chaque zone
+test_results_cv <- site_data %>%
+  filter(Latitudinale_zone != "Polar/Subpolar") %>%
+  group_by(Latitudinale_zone) %>%
+  filter(n_distinct(System) == 2) %>%
+  group_split() %>%
+  map_dfr(~{
+    zone <- unique(.x$Latitudinale_zone)
+    res <- t.test(cv_p_maturity ~ System, data = .x)
+    tidy(res) %>%
+      mutate(Zone = zone,
+             Metric = "Maturity variation coefficient")
+  })
+
+# Combiner les deux tableaux
+combined_results <- bind_rows(test_results_mean, test_results_cv) %>%
+  select(Zone, Metric, estimate1, estimate2, statistic, p.value) %>%
+  mutate(
+    `System comparison` = "benthic vs pelagic",
+    `p.signif` = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      p.value < 0.1 ~ ".",
+      TRUE ~ "ns"
+    )
+  ) %>%
+  relocate(`System comparison`, .after = Metric)
+
+# Affichage du tableau avec gt
+combined_results %>%
+  gt() %>%
+  fmt_number(columns = c(estimate1, estimate2, statistic, p.value), decimals = 3) %>%
+  cols_label(
+    Zone = "Latitudinal Zone",
+    Metric = "Metric",
+    `System comparison` = "Comparison",
+    estimate1 = "Mean (benthic)",
+    estimate2 = "Mean (pelagic)",
+    statistic = "t statistic",
+    p.value = "p-value",
+    p.signif = "Significance"
+  ) %>%
+  tab_header(
+    title = "Significance of Benthic vs Pelagic Differences by Latitudinal Zone"
+  )
+```
+
+```{r Cumulative distributions}
+
+zone_climatique <- sapply(Measurment_data_clustered$latitude, categorize_latitude)
+
+# Résultat
+Measurment_data_clustered <-Measurment_data_clustered %>%
+  mutate( Latitudinale_zone = zone_climatique)
+
+Measurment_data_clustered <- Measurment_data_clustered %>%
+  mutate(System = case_when(
+    Source == "rls" | Source == "bruvs_benthic" ~ "benthic",
+    Source == "bruvs_pelagic" ~ "pelagic"
+  ))
+Measurment_data_clustered <- Measurment_data_clustered[Measurment_data_clustered$Latitudinale_zone != "Polar/Subpolar",]
+
+# Filtrer les individus matures (p_maturity >= 0.90)
+mature_indiv <- Measurment_data_clustered %>%
+  filter(p_maturity >= 0.90, !is.na(cluster), !is.na(System), !is.na(Latitudinale_zone)) %>%
+  mutate(Latitudinale_zone = factor(Latitudinale_zone, levels = c("Tropical", "Subtropical", "Temperate")))
+
+# Compter les individus matures par cluster, zone latitudinale et système
+cluster_counts_mat <- mature_indiv %>%
+  group_by(System, Latitudinale_zone, cluster) %>%
+  summarise(nb_indiv = n(), .groups = "drop") %>%
+  arrange(System, Latitudinale_zone, desc(nb_indiv))
+
+# Calculer les proportions cumulées
+cluster_counts_mat <- cluster_counts_mat %>%
+  group_by(System, Latitudinale_zone) %>%
+  mutate(
+    total_mature_indiv = sum(nb_indiv),
+    cum_sum = cumsum(nb_indiv),
+    cum_perc = cum_sum / total_mature_indiv,
+    cluster_rank = row_number(),
+    cluster_perc = cluster_rank / n()
+  ) %>%
+  ungroup()
+
+# Identifier la proportion de clusters nécessaires pour atteindre 80%
+clusters_needed_mat <- cluster_counts_mat %>%
+  filter(cum_perc <= 0.80) %>%
+  group_by(System, Latitudinale_zone) %>%
+  summarise(
+    threshold_x = max(cluster_perc),
+    .groups = "drop"
+  )
+
+# Fusionner
+plot_data_mat <- cluster_counts_mat %>%
+  left_join(clusters_needed_mat, by = c("System", "Latitudinale_zone"))
+
+latitudinal_colors <- c("Tropical" = "#FFC300", "Subtropical" = "#FF5733", "Temperate" = "#3498DB") # yellow, orange, blue
+
+
+# Tracer la courbe cumulative
+ggplot(plot_data_mat, aes(x = cluster_perc, y = cum_perc, color = Latitudinale_zone)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 1.5) +
+  geom_hline(yintercept = 0.80, linetype = "dashed", color = "black") +
+  geom_vline(aes(xintercept = threshold_x, color = Latitudinale_zone), linetype = "dashed") +
+  scale_color_manual(values = latitudinal_colors) +
+  facet_wrap(~System) +
+  labs(
+    title = "Cumulative distribution of mature individuals (p_maturity ≥ 0.90)",
+    x = "Proportion of surveyed sites (ranked from most to least dense)",
+    y = "Cumulative proportion of mature individuals",
+    color = "Latitudinal zone",
+    linetype = "Maturity threshold : 80% of mature individuals cumulated"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    strip.text = element_text(size = 16, face = "bold"),
+    legend.position = "top"
+  )
+```

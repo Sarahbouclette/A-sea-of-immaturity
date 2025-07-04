@@ -1,0 +1,231 @@
+---
+title: "Report maturity predictions"
+output: html_document
+date: "2025-02-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load data}
+library(openxlsx)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggVennDiagram)
+
+path = ("~/Sea_of_immaturity/data/raw_data")
+
+#Taxa from BRUVS program
+
+info_species_BRUVS <- read.xlsx(paste(path, sep= "/", "BRUVS taxa list 2025_01_6.xlsx"), sheet = 2)
+lspecies_BRUVS <- info_species_BRUVS$Taxa
+
+#Taxa from RLS program
+
+raw_data_RLS <- read.csv(paste(path, sep= "/", "RLS_raw.csv"))
+lspecies_RLS <- unique(raw_data_RLS$species_name)
+
+# Length characteristics repertoried by Chen et al. 2021
+Lengths_Chen <- read.csv(file = here::here("data","raw_data", "Lm_Lmax_Chen_et_al2021.csv"))
+load(file = here::here( "data", "raw_data", "Lengths_Chen_bysex.Rdata"))
+Lengths_Chen <- Lengths_Chen %>%
+  dplyr::select(Scientific.name, Sex, Lm..mm., Lmax..mm., Wmax..g.) %>%
+  dplyr::rename(species_name = Scientific.name, LengthMatMin = Lm..mm., LengthMax = Lmax..mm., WeightMax = Wmax..g.)
+
+Lengths_Chen$LengthMax <- abs(Lengths_Chen$LengthMax)
+
+# Harmoniser les valeurs de la colonne Sex
+Lengths_Chen <- Lengths_Chen %>%
+  mutate(Sex = case_when(
+    Sex %in% c('U/M', 'U') ~ 'unsexed',
+    Sex == 'F' ~ 'female',
+    Sex == 'M' ~ 'male',
+    TRUE ~ Sex  # Conserver les valeurs inchangées si non listées
+  ))
+
+# Length characteristics repertoried by Chu et Pauly 2021
+Lengths_Pauly <- read.csv(file = here::here("data","raw_data", "Lm_Lmax_chu_Pauly2021.csv"))
+load(file = here::here("data", "raw_data", "Lengths_Pauly_bysex.Rdata"))
+Lengths_Pauly <- Lengths_Pauly %>%
+  dplyr::select(Species, Sex, Lm..cm., Lmax..cm., Wmax..g.) %>%
+  dplyr::rename(species_name = Species, LengthMatMin = Lm..cm., LengthMax = Lmax..cm., WeightMax = Wmax..g.)
+
+
+Lengths_Pauly <- Lengths_Pauly %>%
+  mutate(Sex = case_when(
+    Sex %in% c('U', 'UI') ~ 'unsexed',
+    Sex == 'F' ~ 'female',
+    Sex == 'M' ~ 'male',
+    TRUE ~ Sex  # Conserver les valeurs inchangées si non listées
+  ))
+
+# Traits by Tsikliras
+Lengths_Tsikliras <- read.csv(file = here::here("data","raw_data", "Length_at_maturity_Tsikliras.csv"))
+Lengths_Tsikliras_final <- Lengths_Tsikliras %>%
+  rename(species_name = Species, LengthMax = Lmax, LengthMatMin = Lm) %>%
+  select(species_name, LengthMax, LengthMatMin, Sex) %>%
+  filter(Sex != "") %>%
+  mutate(species_name = sub("\\*{1,3}$", "", species_name))  # Supprimer * ou ** ou *** à la fin
+
+Lengths_Tsikliras_final[Lengths_Tsikliras_final$Sex%in%c('C', ' C', ' c'),]$Sex <-'unsexed'
+Lengths_Tsikliras_final[Lengths_Tsikliras_final$Sex%in%c('F'),]$Sex <-'female'
+Lengths_Tsikliras_final[Lengths_Tsikliras_final$Sex%in%c('M'),]$Sex <-'male'
+
+# Maturity data from fishbase
+load(file=here::here("data", "raw_data", "LengthMatMin_fishbase.Rdata"))
+```
+
+## Species to consider
+
+```{r species to consider}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Ajouter une colonne source aux dataframes de départ
+lspecies_BRUVS <- as.data.frame(lspecies_BRUVS) %>% 
+  mutate(source = "BRUVS") %>% 
+  rename(species_name = lspecies_BRUVS)
+
+lspecies_RLS <- as.data.frame(lspecies_RLS) %>% 
+  mutate(source = "RLS") %>% 
+  rename(species_name = lspecies_RLS)
+
+# Combiner les espèces des deux sources
+combined_species <- rbind(lspecies_BRUVS, lspecies_RLS)
+
+# Vérifier si l'espèce est concernée par le pattern d'exclusion
+exclusion_pattern <- "\\bsp(\\d+)?\\b|\\bspp\\b"
+combined_species <- combined_species %>%
+  mutate(excluded = ifelse(grepl(exclusion_pattern, species_name), "Rejected", "Accepted"))
+
+# Compter les espèces par source et statut (acceptées/rejetées)
+species_count <- combined_species %>%
+  group_by(source, excluded) %>%
+  summarise(count = n(), .groups = "drop")
+
+# Ajouter le total des espèces uniques pour éviter les doublons
+total_species <- combined_species %>%
+  distinct(species_name, excluded) %>%
+  group_by(excluded) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  mutate(source = "Total")
+
+# Fusionner les données pour le plot
+plot_data <- bind_rows(species_count, total_species)
+plot_data <- plot_data %>%
+  mutate(Category = case_when(
+    source == "BRUVS" & excluded == "Accepted" ~ "BRUVS_Accepted",
+    source == "BRUVS" & excluded == "Rejected"  ~ "BRUVS_Rejected",
+    source == "RLS" & excluded == "Accepted"   ~ "RLS_Accepted",
+    source == "RLS" & excluded == "Rejected"   ~ "RLS_Rejected",
+    source == "Total" & excluded == "Accepted" ~ "Total_Accepted",
+    source == "Total" & excluded == "Rejected"  ~ "Total_Rejected"
+  ))
+
+plot_data$Category <- factor(plot_data$Category, levels = c(
+  "BRUVS_Rejected", "BRUVS_Accepted",  
+  "RLS_Rejected", "RLS_Accepted",  
+  "Total_Rejected", "Total_Accepted"
+))
+
+# Définition des couleurs
+my_colors <- c(
+  "BRUVS_Accepted" = "#FFB74D",  # Orange clair
+  "BRUVS_Rejected" = "#F57C00",  # Orange foncé
+  "RLS_Accepted" = "#64B5F6",    # Bleu clair
+  "RLS_Rejected" = "#1976D2",    # Bleu foncé
+  "Total_Accepted" = "#BA68C8",  # Violet clair
+  "Total_Rejected" = "#6A1B9A"   # Violet foncé
+)
+
+# Création du stacked bar plot
+ggplot(plot_data, aes(x = source, y = count, fill = Category)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(label = count), position = position_stack(vjust = 0.5), size = 5, color = "black") +
+  scale_fill_manual(values = my_colors) +  # Appliquer la palette personnalisée
+  labs(title = "Species Distribution by Source",
+       x = "Source",
+       y = "Number of Species",
+       fill = "Category") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#f0f8ff"),  # Bleu très clair en fond
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(color = "black", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+
+ ggsave(filename = here::here("figures", "Species_considered.png"),
+        width = 12, height = 8)
+
+```
+
+## Maturity data
+
+```{r Maturity data}
+Lengths_Chen_final <- Lengths_Chen_final |> mutate(source = "Chen")
+Lengths_Pauly_final <- Lengths_Pauly_final |> mutate(source = "Pauly")
+Lengths_Tsikliras_final <- Lengths_Tsikliras_final |> mutate(source = "Tsikliras")
+LengthMatMin_fishbase <- LengthMatMin |> mutate(source = "Fishbase") |>
+  select(-spec_code) |>
+  rename(species_name = Species)
+
+Combined_LengthsMatMin <- Lengths_Chen_final |> 
+  dplyr::full_join(Lengths_Pauly_final) |> 
+  dplyr::full_join(Lengths_Tsikliras_final) |>
+  dplyr::full_join(LengthMatMin_fishbase)
+
+Combined_LengthsMatMin_unique <- Combined_LengthsMatMin %>%
+  group_by(species_name) %>%
+  summarise(
+    source = ifelse(n() > 1, paste(unique(source), collapse = "/"), first(source)), 
+    .groups = "drop"
+  )
+
+library(ggVennDiagram)
+
+species_list <- list(
+  Chen = Combined_LengthsMatMin$species_name[Combined_LengthsMatMin$source == "Chen"],
+  Pauly = Combined_LengthsMatMin$species_name[Combined_LengthsMatMin$source == "Pauly"],
+  Tsikliras = Combined_LengthsMatMin$species_name[Combined_LengthsMatMin$source == "Tsikliras"],
+  Fishbase = Combined_LengthsMatMin$species_name[Combined_LengthsMatMin$source == "Fishbase"]
+)
+
+ggVennDiagram(species_list)
+```
+
+## Random forest, what do we need for better predictions ?
+
+### Test set predictions with all the species considered
+```{r interactif plots}
+library(htmltools)
+includeHTML("figures/MF3_RF3/interactif_plot_RF3.html")
+```
+
+### Test set predictions without whale shark
+```{r interactif plots 2}
+includeHTML("figures/MF3_RF3/Without_whale_shark/interactif_plot_RF3_W_whaleshark.html")
+```
+
+### Test set predictions without sharks
+```{r interactif plots 3}
+
+includeHTML("figures/MF3_RF3/Without_sharks/interactif_plot_RF3_W_sharks.html")
+```
+
+### Test set predictions without blennies and gobies
+```{r interactif plots 4}
+includeHTML("figures/MF3_RF3/Without_blennies_ gobies/interactif_plot_RF3_W_blennies_gobies.html")
+```
+
+
+
+
