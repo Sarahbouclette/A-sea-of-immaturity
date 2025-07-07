@@ -245,10 +245,35 @@ P_mat <- P_mat %>%
 
 ##-------------Diversité ontogénétique--------------------------
 
+load("~/Sea_of_immaturity/outputs/MF3 RF3/MF3_species_traits_imputedbis.Rdata")
+
+species_traits_imputed <- species_traits_imputed %>%
+  mutate(log_LMax = 10^log_LMax-1) %>%
+  rename(LMax=log_LMax)
+
+Measurment_data_clustered <- Measurment_data_clustered %>% left_join(species_traits_imputed %>% select(species_name, LMax), by ="species_name")
+
 shannon_index <- Measurment_data_clustered %>%
-  mutate(class_mat = cut(p_maturity,
-                         breaks = c(0, 0.1, 0.9, 1),
-                         labels = c("Juvenile", "Subadult", "Adult"))) %>%
+  mutate(
+    class_mat = case_when(
+      is.na(p_maturity) ~ "Infra-adult",  # Gérer les NA d'entrée
+      p_maturity <= 0.1 ~ "Juvenile",
+      p_maturity <= 0.9 ~ "Subadult",
+      p_maturity <= 1   ~ "Adult",
+      TRUE ~ NA_character_
+    ),
+    
+    class_mat = case_when(
+      class_mat == "Adult" & !is.na(Lm_max) & !is.na(LMax) & Lm_max > LMax & Length >= Lm_max + (LMax - Lm_max) / 2 ~ "Supra-adult",
+      class_mat == "Adult" & !is.na(Lm_max) & !is.na(LMax) & Lm_max > LMax & Length <  Lm_max + (LMax - Lm_max) / 2 ~ "Infra-adult",
+      class_mat == "Adult" & !is.na(LMax)   & Lm_max <= LMax & Length >= LMax                                      ~ "Supra-adult",
+      class_mat == "Adult" & !is.na(LMax)   & Lm_max <= LMax & Length <  LMax                                      ~ "Infra-adult",
+      class_mat == "Adult" & is.na(LMax)       ~ "Infra-adult",
+      TRUE ~ class_mat
+    ),
+    
+    class_mat = factor(class_mat, levels = c("Juvenile", "Subadult", "Infra-adult", "Supra-adult"))
+  )%>%
   group_by(cluster, class_mat) %>%
   summarise(n = n(), .groups = "drop") %>%
   group_by(cluster) %>%
